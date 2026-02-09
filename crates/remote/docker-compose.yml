@@ -8,6 +8,7 @@ services:
       POSTGRES_PASSWORD: remote
     volumes:
       - remote-db-data:/var/lib/postgresql/data
+    networks: [vk-shared]
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U remote -d remote" ]
       interval: 5s
@@ -16,7 +17,7 @@ services:
       start_period: 5s
     ports:
       - "5433:5432"
-
+    
   electric:
     image: electricsql/electric:1.3.3
     working_dir: /app
@@ -32,6 +33,7 @@ services:
       ELECTRIC_FEATURE_FLAGS: allow_subqueries,tagged_subqueries
     volumes:
       - electric-data:/app/persistent
+    networks: [vk-shared]
     depends_on:
       remote-db:
         condition: service_healthy
@@ -92,7 +94,12 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
-
+    networks: [vk-shared]
+    
 volumes:
   remote-db-data:
   electric-data:
+
+networks:
+  vk-shared:
+    external: true
