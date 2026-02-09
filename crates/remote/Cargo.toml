@@ -10,7 +10,7 @@ path = "src/bin/generate_types.rs"
 
 [features]
 default = []
-vk-billing = ["dep:billing"]
+#vk-billing = ["dep:billing"]
 
 [dependencies]
 # private crate for billing functionality
