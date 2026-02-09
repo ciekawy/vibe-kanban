@@ -41,13 +41,14 @@ services:
         condition: service_healthy
 
   remote-server:
-    build:
-      context: ../..
-      dockerfile: crates/remote/Dockerfile
-      args:
-        FEATURES: ${FEATURES:-}
-        POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
-        POSTHOG_API_ENDPOINT: ${POSTHOG_API_ENDPOINT:-}
+    image: vk-remote
+    # build:
+    #   context: ../..
+    #   dockerfile: crates/remote/Dockerfile
+    #   args:
+    #     FEATURES: ${FEATURES:-}
+    #     POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
+    #     POSTHOG_API_ENDPOINT: ${POSTHOG_API_ENDPOINT:-}
       # ssh:
       #   - default
     depends_on:
