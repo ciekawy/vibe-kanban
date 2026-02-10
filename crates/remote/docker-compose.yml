@@ -71,9 +71,9 @@ services:
       VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET:?set in .env.remote}
       LOOPS_EMAIL_API_KEY: ${LOOPS_EMAIL_API_KEY:?set in .env.remote}
       FRONTEND_PORT: "3002"
-      SERVER_PUBLIC_BASE_URL: http://localhost:3002
-      VITE_APP_BASE_URL: http://localhost:3002
-      VITE_API_BASE_URL: http://localhost:3002
+      SERVER_PUBLIC_BASE_URL: ${SERVER_PUBLIC_BASE_URL:-http://localhost:3002}
+      VITE_APP_BASE_URL: ${VITE_APP_BASE_URL:-http://localhost:3002}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3002}
       ELECTRIC_ROLE_PASSWORD: ${ELECTRIC_ROLE_PASSWORD:?set in .env.remote}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
