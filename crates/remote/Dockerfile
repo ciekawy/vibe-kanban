@@ -37,10 +37,16 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY rust-toolchain.toml ./
-COPY Cargo.toml Cargo.lock ./
-COPY crates crates
+COPY crates/remote/Cargo.toml crates/remote/Cargo.lock crates/remote/
+COPY crates/remote/.sqlx crates/remote/.sqlx
+COPY crates/remote/migrations crates/remote/migrations
+COPY crates/api-types crates/api-types
+COPY crates/utils crates/utils
 COPY shared shared
 COPY assets assets
+
+# Copy only the remote crate source last so unrelated changes don't bust cache
+COPY crates/remote/src crates/remote/src
 
 RUN mkdir -p /app/bin
 
@@ -57,7 +63,6 @@ RUN if [ -z "${FEATURES}" ]; then \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    --mount=type=ssh \
     cargo build ${FEATURES:+--locked} --release --manifest-path crates/remote/Cargo.toml ${FEATURES:+--features ${FEATURES}} \
  && cp crates/remote/target/release/${APP_NAME} /app/bin/${APP_NAME}
 
