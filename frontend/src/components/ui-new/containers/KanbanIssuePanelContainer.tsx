@@ -12,7 +12,7 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { useProjectContext } from '@/contexts/remote/ProjectContext';
 import { useOrgContext } from '@/contexts/remote/OrgContext';
 import { useKanbanNavigation } from '@/hooks/useKanbanNavigation';
-import { useProjectRightSidebar } from '@/contexts/ProjectRightSidebarContext';
+import { useProjectWorkspaceCreateDraft } from '@/hooks/useProjectWorkspaceCreateDraft';
 import {
   KanbanIssuePanel,
   type IssueFormData,
@@ -22,6 +22,11 @@ import { useUserContext } from '@/contexts/remote/UserContext';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
 import { CommandBarDialog } from '@/components/ui-new/dialogs/CommandBarDialog';
 import { getWorkspaceDefaults } from '@/lib/workspaceDefaults';
+import {
+  buildLinkedIssueCreateState,
+  buildWorkspaceCreateInitialState,
+  buildWorkspaceCreatePrompt,
+} from '@/lib/workspaceCreateState';
 import { ScratchType, type DraftIssueData } from 'shared/types';
 import { useScratch } from '@/hooks/useScratch';
 import {
@@ -53,7 +58,7 @@ export function KanbanIssuePanelContainer() {
     updateCreateDefaults,
   } = useKanbanNavigation();
 
-  const { openWorkspaceCreate } = useProjectRightSidebar();
+  const { openWorkspaceCreateFromState } = useProjectWorkspaceCreateDraft();
   const { workspaces } = useUserContext();
   const { activeWorkspaces, archivedWorkspaces } = useWorkspaceContext();
 
@@ -211,9 +216,7 @@ export function KanbanIssuePanelContainer() {
 
   // Track previous issue ID to detect actual issue switches (not just data updates)
   const prevIssueIdRef = useRef<string | null>(null);
-
-  // Track previous issue ID for title content sync
-  const lastTitleIssueIdRef = useRef<string | null | undefined>(null);
+  const titleInputRef = useRef<HTMLTextAreaElement>(null);
 
   const [formState, dispatchFormState] = useReducer(
     kanbanIssuePanelFormReducer,
@@ -223,45 +226,23 @@ export function KanbanIssuePanelContainer() {
   const createFormData = formState.createFormData;
   const isDraftAutosavePaused = formState.isDraftAutosavePaused;
 
-  // Callback ref that handles title content sync and auto-focus
-  const titleRefCallback = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (node) {
-        // Set title content when issue changes
-        if (selectedKanbanIssueId !== lastTitleIssueIdRef.current) {
-          const title =
-            mode === 'create'
-              ? (createFormData?.title ?? '')
-              : (selectedIssue?.title ?? '');
-          node.textContent = title;
-          lastTitleIssueIdRef.current = selectedKanbanIssueId;
-        } else if (mode === 'create') {
-          const title = createFormData?.title ?? '';
-          if (node.textContent !== title) {
-            // Handle late scratch restore and explicit clear after draft delete
-            node.textContent = title;
-          }
-        }
-        // Auto-focus in create mode after any dialog close focus handling runs.
-        // Avoid resetting caret while the user is actively editing the title.
-        if (mode === 'create' && document.activeElement !== node) {
-          requestAnimationFrame(() => {
-            node.focus();
-            // Place cursor at end of content (not start)
-            if (node.textContent) {
-              const selection = window.getSelection();
-              const range = document.createRange();
-              range.selectNodeContents(node);
-              range.collapse(false);
-              selection?.removeAllRanges();
-              selection?.addRange(range);
-            }
-          });
-        }
-      }
-    },
-    [selectedKanbanIssueId, selectedIssue?.title, mode, createFormData?.title]
-  );
+  useEffect(() => {
+    if (mode !== 'create') return;
+
+    const titleInput = titleInputRef.current;
+    if (!titleInput || document.activeElement === titleInput) return;
+
+    const frameId = requestAnimationFrame(() => {
+      const node = titleInputRef.current;
+      if (!node || document.activeElement === node) return;
+
+      node.focus();
+      const caretIndex = node.value.length;
+      node.setSelectionRange(caretIndex, caretIndex);
+    });
+
+    return () => cancelAnimationFrame(frameId);
+  }, [mode, selectedKanbanIssueId, createFormData?.title]);
 
   // Display ID: use real simple_id in edit mode, placeholder for create mode
   const displayId = useMemo(() => {
@@ -757,10 +738,10 @@ export function KanbanIssuePanelContainer() {
 
         // Navigate to workspace creation if requested
         if (displayData.createDraftWorkspace) {
-          // Build initial prompt from issue title and description
-          const initialPrompt = displayData.description
-            ? `${displayData.title}\n\n${displayData.description}`
-            : displayData.title;
+          const initialPrompt = buildWorkspaceCreatePrompt(
+            displayData.title,
+            displayData.description
+          );
 
           // Get defaults from most recent workspace
           const defaults = await getWorkspaceDefaults(
@@ -772,17 +753,17 @@ export function KanbanIssuePanelContainer() {
           cancelDebouncedDraftIssue();
           deleteDraftIssueScratch().catch(console.error);
 
-          openWorkspaceCreate({
-            initialPrompt,
-            preferredRepos: defaults?.preferredRepos ?? null,
-            project_id: defaults?.project_id ?? null,
-            linkedIssue: {
-              issueId: syncedIssue.id,
-              simpleId: syncedIssue.simple_id,
-              title: displayData.title,
-              remoteProjectId: projectId,
-            },
+          const createState = buildWorkspaceCreateInitialState({
+            prompt: initialPrompt,
+            defaults,
+            linkedIssue: buildLinkedIssueCreateState(syncedIssue, projectId),
           });
+          const draftId = await openWorkspaceCreateFromState(createState, {
+            issueId: syncedIssue.id,
+          });
+          if (!draftId) {
+            openIssue(syncedIssue.id);
+          }
           return; // Don't open issue panel since we're navigating away
         }
 
@@ -812,7 +793,7 @@ export function KanbanIssuePanelContainer() {
     insertIssueTag,
     openIssue,
     kanbanCreateDefaultParentIssueId,
-    openWorkspaceCreate,
+    openWorkspaceCreateFromState,
     workspaces,
     localWorkspaceIds,
     closeKanbanIssuePanel,
@@ -905,7 +886,7 @@ export function KanbanIssuePanelContainer() {
       descriptionSaveStatus={
         mode === 'edit' ? descriptionSaveStatus : undefined
       }
-      titleRef={titleRefCallback}
+      titleInputRef={titleInputRef}
       onDeleteDraft={
         mode === 'create' && isCreateDraftDirty ? handleDeleteDraft : undefined
       }

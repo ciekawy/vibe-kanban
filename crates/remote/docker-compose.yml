@@ -1,3 +1,5 @@
+# Self-hosting: set PUBLIC_BASE_URL to your public URL (e.g. https://kanban.example.com)
+# and REMOTE_SERVER_PORTS=0.0.0.0:3000:8081 so the server is reachable from other hosts.
 services:
   remote-db:
     image: postgres:16-alpine
@@ -25,7 +27,7 @@ services:
     working_dir: /app
     restart: on-failure
     environment:
-      DATABASE_URL: postgresql://electric_sync:${ELECTRIC_ROLE_PASSWORD:?set in .env.remote}@remote-db:5432/remote?sslmode=disable
+      DATABASE_URL: postgresql://electric_sync:${ELECTRIC_ROLE_PASSWORD:-remote}@remote-db:5432/remote?sslmode=disable
       PG_PROXY_PORT: 65432
       LOGICAL_PUBLISHER_HOST: electric
       AUTH_MODE: insecure
@@ -46,13 +48,13 @@ services:
 
   remote-server:
     image: vk-remote
-    # build:
-    #   context: ../..
-    #   dockerfile: crates/remote/Dockerfile
-    #   args:
-    #     FEATURES: ${FEATURES:-}
-    #     POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
-    #     POSTHOG_API_ENDPOINT: ${POSTHOG_API_ENDPOINT:-}
+    build:
+      context: ../..
+      dockerfile: crates/remote/Dockerfile
+      args:
+        FEATURES: ${FEATURES:-}
+        POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
+        POSTHOG_API_ENDPOINT: ${POSTHOG_API_ENDPOINT:-}
       # ssh:
       #   - default
     depends_on:
@@ -64,11 +66,13 @@ services:
       SERVER_DATABASE_URL: postgres://remote:remote@remote-db:5432/remote
       SERVER_LISTEN_ADDR: 0.0.0.0:8081
       ELECTRIC_URL: http://electric:3000
+      # OAuth — configure at least one provider (GitHub or Google)
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?set in .env.remote}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?set in .env.remote}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:?set in .env.remote}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:?set in .env.remote}
       VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET:?set in .env.remote}
+      # Optional — leave empty to disable invitation emails
       LOOPS_EMAIL_API_KEY: ${LOOPS_EMAIL_API_KEY:?set in .env.remote}
       FRONTEND_PORT: "3002"
       SERVER_PUBLIC_BASE_URL: ${SERVER_PUBLIC_BASE_URL:-http://localhost:3002}
@@ -91,7 +95,7 @@ services:
       STRIPE_FREE_SEAT_LIMIT: ${STRIPE_FREE_SEAT_LIMIT:-1}
 
     ports:
-      - "127.0.0.1:3002:8081"
+      - "${REMOTE_SERVER_PORTS:-127.0.0.1:3002:8081}"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8081/health"]

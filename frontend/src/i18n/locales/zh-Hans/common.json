@@ -1,4 +1,7 @@
 {
+  "editorNames": {
+    "custom": "自定义"
+  },
   "buttons": {
     "save": "保存",
     "cancel": "取消",
@@ -412,5 +415,27 @@
     "streamsAffected_other": "{{count}} 个数据流受影响",
     "status": "(状态 {{status}})",
     "refreshPage": "刷新页面"
+  },
+  "onboardingSignIn": {
+    "subtitle": "Sign in to continue",
+    "signedInAs": "Signed in as {{name}}.",
+    "moreOptions": "More options",
+    "featureHeader": "Feature",
+    "signedInHeader": "Signed in",
+    "skipSignInHeader": "Don't sign in",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "migration": {
+    "allProjectsMigrated": "您的所有项目已迁移到云端。",
+    "continueToProjects": "继续前往项目"
+  },
+  "appBar": {
+    "kanban": {
+      "tooltip": "看板",
+      "title": "看板",
+      "description": "登录以使用看板管理您的编码代理。",
+      "migrateOldProjects": "迁移旧项目"
+    }
   }
 }

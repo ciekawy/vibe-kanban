@@ -1,16 +1,17 @@
 import {
-  createContext,
   useContext,
   useCallback,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
+import { createHmrContext } from '@/lib/hmrContext.ts';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Workspace } from 'shared/types';
 import { useOrganizationStore } from '@/stores/useOrganizationStore';
 import { ConfirmDialog } from '@/components/ui-new/dialogs/ConfirmDialog';
+import { buildIssueCreatePath } from '@/lib/routes/projectSidebarRoutes';
 import {
   type ActionDefinition,
   type ActionExecutorContext,
@@ -88,7 +89,10 @@ interface ActionsContextValue {
   executorContext: ActionExecutorContext;
 }
 
-const ActionsContext = createContext<ActionsContextValue | null>(null);
+const ActionsContext = createHmrContext<ActionsContextValue | null>(
+  'ActionsContext',
+  null
+);
 
 interface ActionsProviderProps {
   children: ReactNode;
@@ -129,9 +133,7 @@ export function ActionsProvider({ children }: ActionsProviderProps) {
   const navigateToCreateIssue = useCallback(
     (options?: { statusId?: string }) => {
       if (!projectId) return;
-      const params = new URLSearchParams({ mode: 'create' });
-      if (options?.statusId) params.set('statusId', options.statusId);
-      navigate(`/projects/${projectId}?${params.toString()}`);
+      navigate(buildIssueCreatePath(projectId, options));
     },
     [navigate, projectId]
   );

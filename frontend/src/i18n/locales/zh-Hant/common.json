@@ -1,4 +1,7 @@
 {
+  "editorNames": {
+    "custom": "自訂"
+  },
   "buttons": {
     "save": "儲存",
     "cancel": "取消",
@@ -412,5 +415,27 @@
     "streamsAffected_other": "{{count}} 個資料流受影響",
     "status": "(狀態 {{status}})",
     "refreshPage": "重新整理頁面"
+  },
+  "onboardingSignIn": {
+    "subtitle": "Sign in to continue",
+    "signedInAs": "Signed in as {{name}}.",
+    "moreOptions": "More options",
+    "featureHeader": "Feature",
+    "signedInHeader": "Signed in",
+    "skipSignInHeader": "Don't sign in",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "migration": {
+    "allProjectsMigrated": "您的所有專案已遷移到雲端。",
+    "continueToProjects": "繼續前往專案"
+  },
+  "appBar": {
+    "kanban": {
+      "tooltip": "看板",
+      "title": "看板",
+      "description": "登入以使用看板管理您的編碼代理。",
+      "migrateOldProjects": "遷移舊專案"
+    }
   }
 }

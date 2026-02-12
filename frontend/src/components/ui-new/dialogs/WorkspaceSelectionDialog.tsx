@@ -4,8 +4,16 @@ import NiceModal, { useModal } from '@ebay/nice-modal-react';
 import { useTranslation } from 'react-i18next';
 import { GitBranchIcon, PlusIcon } from '@phosphor-icons/react';
 import { defineModal } from '@/lib/modals';
-import { attemptsApi } from '@/lib/api';
+import { ApiError, attemptsApi } from '@/lib/api';
 import { getWorkspaceDefaults } from '@/lib/workspaceDefaults';
+import { ErrorDialog } from '@/components/ui-new/dialogs/ErrorDialog';
+import { useProjectWorkspaceCreateDraft } from '@/hooks/useProjectWorkspaceCreateDraft';
+import {
+  buildLinkedIssueCreateState,
+  buildLocalWorkspaceIdSet,
+  buildWorkspaceCreateInitialState,
+  buildWorkspaceCreatePrompt,
+} from '@/lib/workspaceCreateState';
 import {
   Command,
   CommandDialog,
@@ -16,7 +24,6 @@ import {
   CommandItem,
 } from '@/components/ui-new/primitives/Command';
 import { useWorkspaceContext } from '@/contexts/WorkspaceContext';
-import { useProjectRightSidebarOptional } from '@/contexts/ProjectRightSidebarContext';
 import {
   ProjectProvider,
   useProjectContext,
@@ -30,6 +37,25 @@ export interface WorkspaceSelectionDialogProps {
 
 const PAGE_SIZE = 50;
 
+function getLinkWorkspaceErrorMessage(error: unknown): string | null {
+  if (error instanceof ApiError && error.status === 409) {
+    return 'This workspace is already linked to an issue.';
+  }
+
+  if (error instanceof Error) {
+    const normalizedMessage = error.message.toLowerCase();
+    if (
+      normalizedMessage.includes('already exists') ||
+      normalizedMessage.includes('already linked')
+    ) {
+      return 'This workspace is already linked to an issue.';
+    }
+    return error.message;
+  }
+
+  return null;
+}
+
 /** Inner component that uses contexts to render the selection UI */
 function WorkspaceSelectionContent({
   projectId,
@@ -41,7 +67,7 @@ function WorkspaceSelectionContent({
   const { t } = useTranslation('common');
   const modal = useModal();
   const navigate = useNavigate();
-  const projectRightSidebar = useProjectRightSidebarOptional();
+  const { openWorkspaceCreateFromState } = useProjectWorkspaceCreateDraft();
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
   // Get local workspaces from WorkspaceContext (both active and archived)
@@ -121,13 +147,20 @@ function WorkspaceSelectionContent({
         // Success - close dialog. UI will auto-update via Electric sync.
         modal.hide();
       } catch (err) {
-        console.error('Error linking workspace:', err);
-        // TODO: Show error toast
+        const errorMessage =
+          getLinkWorkspaceErrorMessage(err) ??
+          t('workspaces.linkError', 'Failed to link workspace');
+
+        await ErrorDialog.show({
+          title: t('common:error'),
+          message: errorMessage,
+          buttonText: t('common:ok'),
+        });
       } finally {
         setIsLinking(false);
       }
     },
-    [projectId, issueId, isLinking, modal]
+    [projectId, issueId, isLinking, modal, t]
   );
 
   const handleCreateNewWorkspace = useCallback(async () => {
@@ -137,17 +170,16 @@ function WorkspaceSelectionContent({
     try {
       // Get issue details for initial prompt
       const issue = getIssue(issueId);
-      const initialPrompt = issue
-        ? issue.description
-          ? `${issue.title}\n\n${issue.description}`
-          : issue.title
-        : null;
+      const initialPrompt = buildWorkspaceCreatePrompt(
+        issue?.title ?? null,
+        issue?.description ?? null
+      );
 
       // Build set of local workspace IDs that exist on this machine
-      const localWorkspaceIds = new Set([
-        ...activeWorkspaces.map((w) => w.id),
-        ...archivedWorkspaces.map((w) => w.id),
-      ]);
+      const localWorkspaceIds = buildLocalWorkspaceIdSet(
+        activeWorkspaces,
+        archivedWorkspaces
+      );
 
       // Get defaults from most recent workspace
       const defaults = await getWorkspaceDefaults(
@@ -156,24 +188,17 @@ function WorkspaceSelectionContent({
       );
 
       // Navigate and close dialog
-      const createState = {
-        initialPrompt,
-        preferredRepos: defaults?.preferredRepos,
-        project_id: defaults?.project_id,
-        linkedIssue: issue
-          ? {
-              issueId: issue.id,
-              simpleId: issue.simple_id,
-              title: issue.title,
-              remoteProjectId: projectId,
-            }
-          : null,
-      };
+      const createState = buildWorkspaceCreateInitialState({
+        prompt: initialPrompt,
+        defaults,
+        linkedIssue: buildLinkedIssueCreateState(issue, projectId),
+      });
 
       modal.hide();
-      if (projectRightSidebar) {
-        projectRightSidebar.openWorkspaceCreate(createState);
-      } else {
+      const draftId = await openWorkspaceCreateFromState(createState, {
+        issueId,
+      });
+      if (!draftId) {
         navigate('/workspaces/create', {
           state: createState,
         });
@@ -184,7 +209,7 @@ function WorkspaceSelectionContent({
   }, [
     modal,
     navigate,
-    projectRightSidebar,
+    openWorkspaceCreateFromState,
     getIssue,
     issueId,
     projectId,
