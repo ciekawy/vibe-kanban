@@ -182,6 +182,10 @@ pub struct McpListIssuesRequest {
         description = "The ID of the project to list issues from. Optional if running inside a workspace linked to a remote project."
     )]
     pub project_id: Option<Uuid>,
+    #[schemars(
+        description = "Optional search query. KISS: currently only supports full issue simple_id (e.g. 'ABC-123')."
+    )]
+    pub query: Option<String>,
     #[schemars(description = "Maximum number of issues to return (default: 50)")]
     pub limit: Option<i32>,
 }
@@ -190,6 +194,8 @@ pub struct McpListIssuesRequest {
 pub struct IssueSummary {
     #[schemars(description = "The unique identifier of the issue")]
     pub id: String,
+    #[schemars(description = "The human-readable issue identifier (e.g. 'ABC-123')")]
+    pub simple_id: String,
     #[schemars(description = "The title of the issue")]
     pub title: String,
     #[schemars(description = "Current status of the issue")]
@@ -204,6 +210,8 @@ pub struct IssueSummary {
 pub struct IssueDetails {
     #[schemars(description = "The unique identifier of the issue")]
     pub id: String,
+    #[schemars(description = "The human-readable issue identifier (e.g. 'ABC-123')")]
+    pub simple_id: String,
     #[schemars(description = "The title of the issue")]
     pub title: String,
     #[schemars(description = "Optional description of the issue")]
@@ -834,6 +842,7 @@ impl TaskServer {
             .unwrap_or_else(|| issue.status_id.to_string());
         IssueSummary {
             id: issue.id.to_string(),
+            simple_id: issue.simple_id.clone(),
             title: issue.title.clone(),
             status,
             created_at: issue.created_at.to_rfc3339(),
@@ -867,6 +876,7 @@ impl TaskServer {
             .await;
         IssueDetails {
             id: issue.id.to_string(),
+            simple_id: issue.simple_id.clone(),
             title: issue.title.clone(),
             description: issue.description.clone(),
             status,
@@ -1137,7 +1147,11 @@ impl TaskServer {
     )]
     async fn list_issues(
         &self,
-        Parameters(McpListIssuesRequest { project_id, limit }): Parameters<McpListIssuesRequest>,
+        Parameters(McpListIssuesRequest {
+            project_id,
+            query,
+            limit,
+        }): Parameters<McpListIssuesRequest>,
     ) -> Result<CallToolResult, ErrorData> {
         let project_id = match self.resolve_project_id(project_id) {
             Ok(id) => id,
@@ -1151,7 +1165,26 @@ impl TaskServer {
         };
 
         let issue_limit = limit.unwrap_or(50).max(0) as usize;
-        let limited: Vec<&Issue> = response.issues.iter().take(issue_limit).collect();
+
+        let query = query.and_then(|q| {
+            let trimmed = q.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_ascii_lowercase())
+            }
+        });
+
+        let filtered: Vec<&Issue> = match &query {
+            Some(q) => response
+                .issues
+                .iter()
+                .filter(|issue| issue.simple_id.to_ascii_lowercase() == *q)
+                .collect(),
+            None => response.issues.iter().collect(),
+        };
+
+        let limited: Vec<&Issue> = filtered.into_iter().take(issue_limit).collect();
         let status_names_by_id =
             self.fetch_project_statuses(project_id)
                 .await
@@ -1480,8 +1513,12 @@ impl TaskServer {
         &self,
         Parameters(McpListTasksRequest { project_id, limit }): Parameters<McpListTasksRequest>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.list_issues(Parameters(McpListIssuesRequest { project_id, limit }))
-            .await
+        self.list_issues(Parameters(McpListIssuesRequest {
+            project_id,
+            query: None,
+            limit,
+        }))
+        .await
     }
 
     #[tool(
