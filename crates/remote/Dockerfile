@@ -37,23 +37,28 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY rust-toolchain.toml ./
-COPY crates/remote/Cargo.toml crates/remote/Cargo.lock crates/remote/
-COPY crates/remote/.sqlx crates/remote/.sqlx
-COPY crates/remote/migrations crates/remote/migrations
-COPY crates/api-types crates/api-types
-COPY crates/utils crates/utils
+COPY Cargo.toml Cargo.lock ./
+COPY crates crates
 COPY shared shared
 COPY assets assets
 
-# Copy only the remote crate source last so unrelated changes don't bust cache
-COPY crates/remote/src crates/remote/src
-
 RUN mkdir -p /app/bin
+
+# When building without FEATURES (self-hosted), strip the private billing dependency
+# and its feature flag from Cargo.toml so cargo doesn't try to fetch the private git repo.
+# Also remove the Cargo.lock which references the private repo.
+RUN if [ -z "${FEATURES}" ]; then \
+      sed -i '/^billing = {.*vibe-kanban-private.*/d' crates/remote/Cargo.toml; \
+      sed -i '/^# private crate for billing/d' crates/remote/Cargo.toml; \
+      sed -i '/^vk-billing = \["dep:billing"\]/d' crates/remote/Cargo.toml; \
+      rm -f crates/remote/Cargo.lock; \
+    fi
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/crates/remote/target \
-    cargo build --locked --release --manifest-path crates/remote/Cargo.toml ${FEATURES:+--features ${FEATURES}} \
+    --mount=type=cache,target=/app/target \
+    --mount=type=ssh \
+    cargo build ${FEATURES:+--locked} --release --manifest-path crates/remote/Cargo.toml ${FEATURES:+--features ${FEATURES}} \
  && cp crates/remote/target/release/${APP_NAME} /app/bin/${APP_NAME}
 
 FROM debian:bookworm-slim AS runtime
