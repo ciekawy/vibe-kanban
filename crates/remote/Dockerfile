@@ -16,6 +16,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --filter ./remote-frontend --frozen-lockfile
 
 COPY remote-frontend/ remote-frontend/
+COPY shared/ shared/
 
 RUN pnpm -C remote-frontend build
 
@@ -84,6 +85,6 @@ ENV SERVER_LISTEN_ADDR=0.0.0.0:8081 \
 EXPOSE 8081
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["wget","--spider","-q","http://127.0.0.1:8081/health"]
+  CMD ["wget","--spider","-q","http://127.0.0.1:8081/v1/health"]
 
 ENTRYPOINT ["/usr/local/bin/remote"]

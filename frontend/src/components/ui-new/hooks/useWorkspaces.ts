@@ -11,7 +11,6 @@ import type {
 // UI-specific workspace type for sidebar display
 export interface SidebarWorkspace {
   id: string;
-  taskId: string;
   name: string;
   branch: string;
   description: string;
@@ -27,6 +26,8 @@ export interface SidebarWorkspace {
   latestProcessCompletedAt?: string;
   latestProcessStatus?: 'running' | 'completed' | 'failed' | 'killed';
   prStatus?: 'open' | 'merged' | 'closed' | 'unknown';
+  prNumber?: number;
+  prUrl?: string;
 }
 
 // Keep the old export name for backwards compatibility
@@ -52,7 +53,6 @@ function toSidebarWorkspace(
 ): SidebarWorkspace {
   return {
     id: ws.id,
-    taskId: ws.task_id,
     name: ws.name ?? ws.branch, // Use name if available, fallback to branch
     branch: ws.branch,
     description: '',
@@ -71,6 +71,9 @@ function toSidebarWorkspace(
     latestProcessCompletedAt: summary?.latest_process_completed_at ?? undefined,
     latestProcessStatus: summary?.latest_process_status ?? undefined,
     prStatus: summary?.pr_status ?? undefined,
+    prNumber:
+      summary?.pr_number != null ? Number(summary.pr_number) : undefined,
+    prUrl: summary?.pr_url ?? undefined,
   };
 }
 

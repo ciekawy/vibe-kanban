@@ -7,6 +7,7 @@ import {
   useImperativeHandle,
   useRef,
   useEffect,
+  type ReactNode,
 } from 'react';
 import { LexicalComposer } from '@lexical/react/LexicalComposer';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
@@ -21,6 +22,11 @@ import {
   PR_COMMENT_TRANSFORMER,
   PR_COMMENT_EXPORT_TRANSFORMER,
 } from './wysiwyg/nodes/pr-comment-node';
+import {
+  ComponentInfoNode,
+  COMPONENT_INFO_TRANSFORMER,
+  COMPONENT_INFO_EXPORT_TRANSFORMER,
+} from './wysiwyg/nodes/component-info-node';
 import { TABLE_TRANSFORMER } from './wysiwyg/transformers/table-transformer';
 import {
   TaskAttemptContext,
@@ -33,6 +39,7 @@ import { FileTagTypeaheadPlugin } from './wysiwyg/plugins/file-tag-typeahead-plu
 import { SlashCommandTypeaheadPlugin } from './wysiwyg/plugins/slash-command-typeahead-plugin';
 import { KeyboardCommandsPlugin } from './wysiwyg/plugins/keyboard-commands-plugin';
 import { ImageKeyboardPlugin } from './wysiwyg/plugins/image-keyboard-plugin';
+import { ComponentInfoKeyboardPlugin } from './wysiwyg/plugins/component-info-keyboard-plugin';
 import { ReadOnlyLinkPlugin } from './wysiwyg/plugins/read-only-link-plugin';
 import { ClickableCodePlugin } from './wysiwyg/plugins/clickable-code-plugin';
 import { ToolbarPlugin } from './wysiwyg/plugins/toolbar-plugin';
@@ -71,10 +78,8 @@ type WysiwygProps = {
   disabled?: boolean;
   onPasteFiles?: (files: File[]) => void;
   className?: string;
-  /** Repo IDs for file search in typeahead (preferred over projectId) */
+  /** Repo IDs for file search in typeahead */
   repoIds?: string[];
-  /** Project ID for file search in typeahead (fallback if repoIds not provided) */
-  projectId?: string;
   /** Enables `/` command autocomplete (agent-specific). */
   executor?: BaseCodingAgent | null;
   onCmdEnter?: () => void;
@@ -103,12 +108,91 @@ type WysiwygProps = {
   showStaticToolbar?: boolean;
   /** Save status indicator for static toolbar */
   saveStatus?: 'idle' | 'saved';
+  /** Additional actions to render in static toolbar */
+  staticToolbarActions?: ReactNode;
 };
 
 /** Ref interface for WYSIWYGEditor, exposing imperative methods */
 export interface WYSIWYGEditorRef {
   /** Focus the editor */
   focus: () => void;
+}
+
+const GENERIC_CLIPBOARD_IMAGE_BASE_NAMES = new Set([
+  'image',
+  'output',
+  'clipboard',
+  'pasted-image',
+  'screenshot',
+]);
+const MAX_CLIPBOARD_PASTED_FILES = 10;
+
+function getImageMimePriority(mimeType: string): number {
+  if (mimeType === 'image/png') return 5;
+  if (mimeType === 'image/webp') return 4;
+  if (mimeType === 'image/jpeg' || mimeType === 'image/jpg') return 3;
+  if (mimeType === 'image/gif') return 2;
+  return 1;
+}
+
+function isGenericClipboardImageName(fileName: string): boolean {
+  const baseName = fileName
+    .replace(/\.[^.]+$/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-');
+  return GENERIC_CLIPBOARD_IMAGE_BASE_NAMES.has(baseName);
+}
+
+function dedupeClipboardFiles(files: File[]): File[] {
+  if (files.length <= 1) {
+    return files;
+  }
+
+  const uniqueByMetadata: File[] = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const key = `${file.name}:${file.type}:${file.size}:${file.lastModified}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueByMetadata.push(file);
+  }
+
+  if (uniqueByMetadata.length <= 1) {
+    return uniqueByMetadata;
+  }
+
+  const imageFiles = uniqueByMetadata.filter((f) =>
+    f.type.startsWith('image/')
+  );
+  const nonImageFiles = uniqueByMetadata.filter(
+    (f) => !f.type.startsWith('image/')
+  );
+
+  if (nonImageFiles.length > 0 || imageFiles.length <= 1) {
+    return uniqueByMetadata.slice(0, MAX_CLIPBOARD_PASTED_FILES);
+  }
+
+  const nonGenericImageFiles = imageFiles.filter(
+    (f) => !isGenericClipboardImageName(f.name)
+  );
+
+  if (imageFiles.length >= 3 && nonGenericImageFiles.length === 1) {
+    return [nonGenericImageFiles[0]];
+  }
+
+  if (imageFiles.length >= 3 && nonGenericImageFiles.length === 0) {
+    const [preferredImage] = [...imageFiles].sort((a, b) => {
+      const priorityDiff =
+        getImageMimePriority(b.type) - getImageMimePriority(a.type);
+      if (priorityDiff !== 0) return priorityDiff;
+      return b.size - a.size;
+    });
+
+    return preferredImage ? [preferredImage] : uniqueByMetadata;
+  }
+
+  return uniqueByMetadata.slice(0, MAX_CLIPBOARD_PASTED_FILES);
 }
 
 /** Plugin to capture the Lexical editor instance into a ref */
@@ -150,6 +234,7 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
       onCodeClick,
       showStaticToolbar = false,
       saveStatus,
+      staticToolbarActions,
     }: WysiwygProps,
     ref: React.ForwardedRef<WYSIWYGEditorRef>
   ) {
@@ -229,6 +314,7 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
           LinkNode,
           ImageNode,
           PrCommentNode,
+          ComponentInfoNode,
           TableNode,
           TableRowNode,
           TableCellNode,
@@ -242,8 +328,10 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
       () => [
         TABLE_TRANSFORMER,
         IMAGE_TRANSFORMER,
-        PR_COMMENT_EXPORT_TRANSFORMER, // Export transformer for DecoratorNode (must be before import transformer)
-        PR_COMMENT_TRANSFORMER, // Import transformer for fenced code block
+        PR_COMMENT_EXPORT_TRANSFORMER,
+        PR_COMMENT_TRANSFORMER,
+        COMPONENT_INFO_EXPORT_TRANSFORMER,
+        COMPONENT_INFO_TRANSFORMER,
         CODE,
         ...TRANSFORMERS,
       ],
@@ -258,11 +346,21 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
         const dt = event.clipboardData;
         if (!dt) return;
 
-        const files: File[] = Array.from(dt.files || []).filter((f) =>
-          f.type.startsWith('image/')
-        );
+        const filesFromItems = Array.from(dt.items || [])
+          .filter((item) => item.kind === 'file')
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null);
+
+        const clipboardFiles =
+          filesFromItems.length > 0
+            ? filesFromItems
+            : Array.from(dt.files || []);
+
+        const files: File[] = dedupeClipboardFiles(clipboardFiles);
 
         if (files.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
           onPasteFiles(files);
         }
       },
@@ -307,7 +405,7 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
                         aria-label={
                           disabled ? 'Markdown content' : 'Markdown editor'
                         }
-                        onPaste={handlePaste}
+                        onPasteCapture={handlePaste}
                       />
                     }
                     placeholder={placeholderElement}
@@ -316,7 +414,10 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
                 </div>
 
                 {!disabled && showStaticToolbar && (
-                  <StaticToolbarPlugin saveStatus={saveStatus} />
+                  <StaticToolbarPlugin
+                    saveStatus={saveStatus}
+                    extraActions={staticToolbarActions}
+                  />
                 )}
 
                 <ListPlugin />
@@ -348,6 +449,7 @@ const WYSIWYGEditor = forwardRef<WYSIWYGEditorRef, WysiwygProps>(
                       />
                     </TypeaheadOpenProvider>
                     <ImageKeyboardPlugin />
+                    <ComponentInfoKeyboardPlugin />
                     <CodeBlockShortcutPlugin />
                   </>
                 )}
