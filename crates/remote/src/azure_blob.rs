@@ -56,7 +56,7 @@ pub enum AzureBlobError {
 }
 
 impl AzureBlobService {
-    pub fn new(config: &AzureBlobConfig) -> Self {
+    pub fn new(config: &AzureBlobConfig) -> Result<Self, AzureBlobError> {
         let account_name = config.account_name.clone();
         let account_key = config.account_key.expose_secret().to_string();
         let container_name = config.container_name.clone();
@@ -76,11 +76,18 @@ impl AzureBlobService {
                         user_assigned_id: Some(UserAssignedId::ClientId(client_id.clone())),
                         ..Default::default()
                     }))
-                    .expect("failed to create ManagedIdentityCredential");
+                    .map_err(|e| {
+                        AzureBlobError::Storage(format!(
+                            "failed to create ManagedIdentityCredential: {e}"
+                        ))
+                    })?;
 
                 Arc::new(
-                    BlobServiceClient::new(&endpoint, Some(credential), None)
-                        .expect("failed to create BlobServiceClient with managed identity"),
+                    BlobServiceClient::new(&endpoint, Some(credential), None).map_err(|e| {
+                        AzureBlobError::Storage(format!(
+                            "failed to create BlobServiceClient with managed identity: {e}"
+                        ))
+                    })?,
                 )
             }
             AzureAuthMode::SharedKey => {
@@ -101,12 +108,16 @@ impl AzureBlobService {
                             ..Default::default()
                         }),
                     )
-                    .expect("failed to create BlobServiceClient with shared key"),
+                    .map_err(|e| {
+                        AzureBlobError::Storage(format!(
+                            "failed to create BlobServiceClient with shared key: {e}"
+                        ))
+                    })?,
                 )
             }
         };
 
-        Self {
+        Ok(Self {
             service_client,
             account_name,
             account_key,
@@ -114,7 +125,7 @@ impl AzureBlobService {
             endpoint_url,
             public_endpoint_url,
             presign_expiry,
-        }
+        })
     }
 
     fn container_client(&self) -> BlobContainerClient {

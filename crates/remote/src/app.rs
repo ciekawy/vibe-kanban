@@ -108,10 +108,19 @@ impl Server {
             );
         }
 
-        let azure_blob = config.azure_blob.as_ref().map(AzureBlobService::new);
-        if azure_blob.is_some() {
-            tracing::info!("Azure Blob storage service initialized");
-        } else {
+        let azure_blob = config.azure_blob.as_ref().and_then(|cfg| {
+            match AzureBlobService::new(cfg) {
+                Ok(service) => {
+                    tracing::info!("Azure Blob storage service initialized");
+                    Some(service)
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "Azure Blob storage configured but failed to initialize, attachments will be disabled");
+                    None
+                }
+            }
+        });
+        if azure_blob.is_none() && config.azure_blob.is_none() {
             tracing::info!(
                 "Azure Blob storage not configured. Set AZURE_STORAGE_ACCOUNT_NAME and AZURE_STORAGE_ACCOUNT_KEY to enable issue attachments."
             );
