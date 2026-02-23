@@ -7,6 +7,7 @@ use api_types::{
 use db::models::{
     project::Project,
     repo::Repo,
+    session::Session,
     tag::Tag,
     task::{CreateTask, TaskWithAttemptStatus},
     workspace::{Workspace, WorkspaceContext},
@@ -291,6 +292,28 @@ pub struct StartWorkspaceSessionRequest {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct StartWorkspaceSessionResponse {
     pub workspace_id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RestartWorkspaceSessionRequest {
+    #[schemars(
+        description = "The workspace ID to restart a session in. Optional if running inside a workspace context."
+    )]
+    pub workspace_id: Option<Uuid>,
+    #[schemars(
+        description = "The coding agent executor to run ('CLAUDE_CODE', 'AMP', 'GEMINI', 'CODEX', 'OPENCODE', 'CURSOR_AGENT', 'QWEN_CODE', 'COPILOT', 'DROID')"
+    )]
+    pub executor: String,
+    #[schemars(description = "Optional executor variant, if needed")]
+    pub variant: Option<String>,
+    #[schemars(description = "The initial prompt to send to the new session")]
+    pub prompt: String,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct RestartWorkspaceSessionResponse {
+    pub workspace_id: String,
+    pub session_id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -1198,6 +1221,103 @@ impl TaskServer {
     }
 
     #[tool(
+        description = "Start a fresh agent session within an existing workspace. This creates a new session and sends the initial prompt, equivalent to the 'new session' button in the UI. The workspace must already exist. `workspace_id` is optional if running inside a workspace context."
+    )]
+    async fn restart_workspace_session(
+        &self,
+        Parameters(RestartWorkspaceSessionRequest {
+            workspace_id,
+            executor,
+            variant,
+            prompt,
+        }): Parameters<RestartWorkspaceSessionRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        // Resolve workspace_id from parameter or context
+        let workspace_id = match workspace_id {
+            Some(id) => id,
+            None => {
+                if let Some(ctx) = &self.context {
+                    ctx.workspace_id
+                } else {
+                    return Self::err(
+                        "workspace_id is required (not available from workspace context)",
+                        None::<&str>,
+                    );
+                }
+            }
+        };
+
+        let executor_trimmed = executor.trim();
+        if executor_trimmed.is_empty() {
+            return Self::err("Executor must not be empty.", None::<&str>);
+        }
+
+        let normalized_executor = executor_trimmed.replace('-', "_").to_ascii_uppercase();
+        let base_executor = match BaseCodingAgent::from_str(&normalized_executor) {
+            Ok(exec) => exec,
+            Err(_) => {
+                return Self::err(
+                    format!("Unknown executor '{executor_trimmed}'."),
+                    None::<String>,
+                );
+            }
+        };
+
+        let variant = variant.and_then(|v| {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+
+        let executor_profile_id = ExecutorProfileId {
+            executor: base_executor,
+            variant,
+        };
+
+        // Create a new session in the existing workspace
+        let create_session_url = self.url("/api/sessions");
+        let create_session_payload = serde_json::json!({
+            "workspace_id": workspace_id,
+            "executor": executor_profile_id.executor.to_string(),
+        });
+        let session: Session = match self
+            .send_json(
+                self.client
+                    .post(&create_session_url)
+                    .json(&create_session_payload),
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => return Ok(e),
+        };
+
+        // Send the initial prompt to kick off the session
+        let follow_up_url = self.url(&format!("/api/sessions/{}/follow-up", session.id));
+        let follow_up_payload = serde_json::json!({
+            "prompt": prompt,
+            "executor_profile_id": executor_profile_id,
+            "retry_process_id": null,
+            "force_when_dirty": null,
+            "perform_git_reset": null,
+        });
+        if let Err(e) = self
+            .send_empty_json(self.client.post(&follow_up_url).json(&follow_up_payload))
+            .await
+        {
+            return Ok(e);
+        }
+
+        TaskServer::success(&RestartWorkspaceSessionResponse {
+            workspace_id: workspace_id.to_string(),
+            session_id: session.id.to_string(),
+        })
+    }
+
+    #[tool(
         description = "Update an existing issue's title, description, or status. `issue_id` is required. `title`, `description`, and `status` are optional."
     )]
     async fn update_issue(
@@ -1296,7 +1416,7 @@ impl TaskServer {
 #[tool_handler]
 impl ServerHandler for TaskServer {
     fn get_info(&self) -> ServerInfo {
-        let mut instruction = "A task and project management server. If you need to create or update tickets or issues then use these tools. Most of them absolutely require that you pass the `project_id` of the project that you are currently working on. You can get project ids by using `list projects`. Call `list_issues` to fetch the `issue_ids` of all the issues in a project. TOOLS: 'list_organizations', 'list_projects', 'list_issues', 'create_issue', 'start_workspace_session', 'get_issue', 'update_issue', 'delete_issue', 'list_repos', 'get_repo', 'update_setup_script', 'update_cleanup_script', 'update_dev_server_script'. Make sure to pass `project_id`, `issue_id`, or `repo_id` where required. You can use list tools to get the available ids.".to_string();
+        let mut instruction = "A task and project management server. If you need to create or update tickets or issues then use these tools. Most of them absolutely require that you pass the `project_id` of the project that you are currently working on. You can get project ids by using `list projects`. Call `list_issues` to fetch the `issue_ids` of all the issues in a project. TOOLS: 'list_organizations', 'list_projects', 'list_issues', 'create_issue', 'start_workspace_session', 'restart_workspace_session', 'get_issue', 'update_issue', 'delete_issue', 'list_repos', 'get_repo', 'update_setup_script', 'update_cleanup_script', 'update_dev_server_script'. Make sure to pass `project_id`, `issue_id`, or `repo_id` where required. You can use list tools to get the available ids.".to_string();
         if self.context.is_some() {
             let context_instruction = "Use 'get_context' to fetch project/issue/workspace metadata for the active Vibe Kanban workspace session when available.";
             instruction = format!("{} {}", context_instruction, instruction);
