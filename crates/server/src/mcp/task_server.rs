@@ -1252,6 +1252,11 @@ impl TaskServer {
             return Self::err("Executor must not be empty.", None::<&str>);
         }
 
+        let prompt_trimmed = prompt.trim();
+        if prompt_trimmed.is_empty() {
+            return Self::err("Prompt must not be empty.", None::<&str>);
+        }
+
         let normalized_executor = executor_trimmed.replace('-', "_").to_ascii_uppercase();
         let base_executor = match BaseCodingAgent::from_str(&normalized_executor) {
             Ok(exec) => exec,
