@@ -13,6 +13,7 @@ pub struct RemoteServerConfig {
     pub electric_url: String,
     pub electric_secret: Option<SecretString>,
     pub electric_role_password: Option<SecretString>,
+    pub electric_publication_names: Vec<String>,
     pub r2: Option<R2Config>,
     pub azure_blob: Option<AzureBlobConfig>,
     pub review_worker_base_url: Option<String>,
@@ -100,7 +101,14 @@ impl AzureBlobConfig {
         tracing::info!("AZURE_STORAGE_ACCOUNT_NAME is set, checking other Azure Blob env vars");
 
         let account_key = match env::var("AZURE_STORAGE_ACCOUNT_KEY") {
-            Ok(v) if !v.is_empty() => v,
+            Ok(v) if !v.is_empty() => {
+                // Validate base64 encoding at config time to avoid panics during request signing
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD
+                    .decode(&v)
+                    .map_err(|_| ConfigError::InvalidVar("AZURE_STORAGE_ACCOUNT_KEY (must be valid base64)"))?;
+                v
+            }
             _ => return Err(ConfigError::MissingVar("AZURE_STORAGE_ACCOUNT_KEY")),
         };
 
@@ -226,6 +234,10 @@ impl RemoteServerConfig {
         let electric_role_password = env::var("ELECTRIC_ROLE_PASSWORD")
             .ok()
             .map(|s| SecretString::new(s.into()));
+        let electric_publication_names = match env::var("ELECTRIC_PUBLICATION_NAMES") {
+            Ok(value) => parse_publication_names(&value)?,
+            Err(_) => Vec::new(),
+        };
 
         let r2 = R2Config::from_env()?;
         let azure_blob = AzureBlobConfig::from_env()?;
@@ -246,6 +258,7 @@ impl RemoteServerConfig {
             electric_url,
             electric_secret,
             electric_role_password,
+            electric_publication_names,
             r2,
             azure_blob,
             review_worker_base_url,
@@ -253,6 +266,34 @@ impl RemoteServerConfig {
             github_app,
         })
     }
+}
+
+fn parse_publication_names(value: &str) -> Result<Vec<String>, ConfigError> {
+    let mut names = Vec::new();
+
+    for raw in value.split(',') {
+        let name = raw.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if !is_valid_identifier(name) {
+            return Err(ConfigError::InvalidVar("ELECTRIC_PUBLICATION_NAMES"));
+        }
+        names.push(name.to_string());
+    }
+
+    Ok(names)
+}
+
+fn is_valid_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 #[derive(Debug, Clone)]
