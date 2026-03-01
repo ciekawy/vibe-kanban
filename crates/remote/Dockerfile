@@ -63,7 +63,6 @@ RUN if [ -z "${FEATURES}" ]; then \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    --mount=type=ssh \
     cargo build ${FEATURES:+--locked} --release --manifest-path crates/remote/Cargo.toml ${FEATURES:+--features ${FEATURES}} \
  && cp crates/remote/target/release/${APP_NAME} /app/bin/${APP_NAME}
 
