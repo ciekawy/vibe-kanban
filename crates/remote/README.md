@@ -49,7 +49,7 @@ docker compose --env-file .env.remote -f docker-compose.yml up --build
 
 This starts PostgreSQL, ElectricSQL, the Remote Server, and the Relay Server.
 
-- Remote web UI/API: `http://localhost:3000`
+- Remote web UI/API: `http://localhost:3002` (mapped via REMOTE_SERVER_PORTS)
 - Relay API: `http://localhost:8082`
 - Postgres: `postgres://remote:remote@localhost:5433/remote`
 
@@ -58,7 +58,7 @@ This starts PostgreSQL, ElectricSQL, the Remote Server, and the Relay Server.
 To connect the desktop client to your local remote server (without relay/tunnel):
 
 ```bash
-export VK_SHARED_API_BASE=http://localhost:3000
+export VK_SHARED_API_BASE=http://localhost:3002
 
 pnpm run dev
 ```
