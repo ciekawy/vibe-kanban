@@ -78,7 +78,7 @@ vibe-kanban-*.tgz
 .dev-ports.json
 
 dev_assets
-/packages/web/.env.sentry-build-plugin
+/packages/*/.env.sentry-build-plugin
 .ssh
 
 vibe-kanban-cloud/

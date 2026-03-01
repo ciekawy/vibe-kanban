@@ -4,6 +4,9 @@
 # To enable image attachments, either:
 #   1. Run with Azurite (dev): docker compose --profile azurite up
 #   2. Set AZURE_STORAGE_ACCOUNT_NAME + AZURE_STORAGE_ACCOUNT_KEY in .env.remote (production)
+#
+# For local dev: create dokploy-network first: docker network create dokploy-network
+# (Dokploy deployments have this network automatically)
 services:
   remote-db:
     image: postgres:16-alpine
@@ -104,10 +107,10 @@ services:
       SERVER_LISTEN_ADDR: 0.0.0.0:8081
       ELECTRIC_URL: http://electric:3000
       # OAuth — configure at least one provider (GitHub or Google)
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?set in .env.remote}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?set in .env.remote}
-      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:?set in .env.remote}
-      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:?set in .env.remote}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
       VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET:?set in .env.remote}
       # Optional — leave empty to disable invitation emails
       LOOPS_EMAIL_API_KEY: ${LOOPS_EMAIL_API_KEY:-}
@@ -180,3 +183,5 @@ volumes:
 networks:
   dokploy-network:
     external: true
+    # Dokploy deployment uses this network; local dev can ignore it
+    # Create manually if needed: docker network create dokploy-network

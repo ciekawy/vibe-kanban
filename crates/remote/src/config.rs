@@ -101,7 +101,14 @@ impl AzureBlobConfig {
         tracing::info!("AZURE_STORAGE_ACCOUNT_NAME is set, checking other Azure Blob env vars");
 
         let account_key = match env::var("AZURE_STORAGE_ACCOUNT_KEY") {
-            Ok(v) if !v.is_empty() => v,
+            Ok(v) if !v.is_empty() => {
+                // Validate base64 encoding at config time to avoid panics during request signing
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD
+                    .decode(&v)
+                    .map_err(|_| ConfigError::InvalidVar("AZURE_STORAGE_ACCOUNT_KEY (must be valid base64)"))?;
+                v
+            }
             _ => return Err(ConfigError::MissingVar("AZURE_STORAGE_ACCOUNT_KEY")),
         };
 
