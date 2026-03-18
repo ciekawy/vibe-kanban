@@ -342,8 +342,6 @@ export type OpenEditorRequest = { editor_type: string | null, file_path: string 
 
 export type OpenEditorResponse = { url: string | null, };
 
-export type CreateWorkspaceApiRequest = { name: string | null, };
-
 export type LinkedIssueInfo = { remote_project_id: string, issue_id: string, };
 
 export type CreatePrApiRequest = { title: string, body: string | null, target_branch: string | null, draft: boolean | null, repo_id: string, auto_generate_description: boolean, };
@@ -373,12 +371,6 @@ export type PushError = { "type": "force_push_required" };
 export type PrError = { "type": "cli_not_installed", provider: ProviderKind, } | { "type": "cli_not_logged_in", provider: ProviderKind, } | { "type": "git_cli_not_logged_in" } | { "type": "git_cli_not_installed" } | { "type": "target_branch_not_found", branch: string, } | { "type": "unsupported_provider" };
 
 export type RunScriptError = { "type": "no_script_configured" } | { "type": "process_already_running" };
-
-export type AssociateWorkspaceImagesRequest = { image_ids: Array<string>, };
-
-export type ImportIssueAttachmentsRequest = { issue_id: string, };
-
-export type ImportIssueAttachmentsResponse = { image_ids: Array<string>, };
 
 export type AttachPrResponse = { pr_attached: boolean, pr_url: string | null, pr_number: bigint | null, pr_status: MergeStatus | null, };
 
@@ -609,7 +601,9 @@ export type ExecutorConfigs = { executors: { [key in BaseCodingAgent]?: Executor
 
 export enum BaseAgentCapability { SESSION_FORK = "SESSION_FORK", SETUP_HELPER = "SETUP_HELPER", CONTEXT_USAGE = "CONTEXT_USAGE" }
 
-export type ClaudeCode = { append_prompt: AppendPrompt, claude_code_router?: boolean | null, plan?: boolean | null, approvals?: boolean | null, model?: string | null, agent?: string | null, dangerously_skip_permissions?: boolean | null, disable_api_key?: boolean | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
+export type ClaudeEffort = "low" | "medium" | "high" | "max";
+
+export type ClaudeCode = { append_prompt: AppendPrompt, claude_code_router?: boolean | null, plan?: boolean | null, approvals?: boolean | null, model?: string | null, effort?: ClaudeEffort | null, agent?: string | null, dangerously_skip_permissions?: boolean | null, disable_api_key?: boolean | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
 
 export type Gemini = { append_prompt: AppendPrompt, model?: string | null, yolo?: boolean | null, base_command_override?: string | null, additional_params?: Array<string> | null, env?: { [key in string]?: string } | null, };
 
