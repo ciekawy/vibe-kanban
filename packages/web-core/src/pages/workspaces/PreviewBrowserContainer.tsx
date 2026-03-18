@@ -241,11 +241,21 @@ export function PreviewBrowserContainer({
   } = usePreviewNavigation();
   const bridgeRef = useRef<PreviewDevToolsBridge | null>(null);
   const navigationDevUrl = useMemo(() => {
-    if (!navigation?.url || !previewProxyPort) {
+    if (!navigation?.url) {
       return null;
     }
-    return transformProxyUrlToDevUrl(navigation.url);
-  }, [navigation?.url, previewProxyPort]);
+    // For proxy URLs, transform back to dev URL format.
+    // For direct URLs (non-proxy, e.g. Coder), strip _refresh and return as-is.
+    const transformed = transformProxyUrlToDevUrl(navigation.url);
+    if (transformed) return transformed;
+    try {
+      const url = new URL(navigation.url);
+      url.searchParams.delete('_refresh');
+      return url.toString();
+    } catch {
+      return null;
+    }
+  }, [navigation?.url]);
   const currentPreviewUrl = navigationDevUrl ?? effectiveUrl ?? null;
 
   const handleBridgeMessage = useCallback(
@@ -735,14 +745,34 @@ export function PreviewBrowserContainer({
   //   The proxy extracts the target port from the subdomain and forwards to the dev server.
   //   _refresh query param forces iframe reload on refresh button click.
   // Construct proxy URL for iframe to enable security isolation via separate origin
-  // Uses subdomain-based routing: http://{devPort}.localhost:{proxyPort}{path}
+  // Constructs the URL loaded by the iframe.
+  // Localhost URLs use subdomain-based proxy routing for origin isolation:
+  //   http://{devPort}.localhost:{proxyPort}{path}
+  // Non-localhost URLs (e.g. Coder port-forwarded URLs) are loaded directly
+  // since the subdomain proxy only works for loopback addresses.
   const iframeUrl = useMemo(() => {
-    if (!effectiveUrl || !previewProxyPort) return undefined;
+    if (!effectiveUrl) return undefined;
 
     const parsed = parsePreviewUrl(effectiveUrl, urlInfo?.url ?? undefined);
     if (!parsed) return undefined;
 
     try {
+      // Non-loopback URLs (e.g. Coder port-forwarded URLs like
+      // https://4000--workspace--user.coder.example.com) can be loaded
+      // directly in the iframe — subdomain proxy routing only works for
+      // localhost.
+      const isLoopback = ['localhost', '127.0.0.1', '0.0.0.0'].includes(
+        parsed.hostname
+      );
+      if (!isLoopback) {
+        const directUrl = new URL(parsed.toString());
+        directUrl.searchParams.set('_refresh', String(previewRefreshKey));
+        return directUrl.toString();
+      }
+
+      // Loopback URLs need the preview proxy for origin isolation
+      if (!previewProxyPort) return undefined;
+
       const devServerPort =
         parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
 
@@ -762,13 +792,6 @@ export function PreviewBrowserContainer({
           `[Preview] Ignoring dev server URL with same port as preview proxy (${devServerPort}).`
         );
         return undefined;
-      }
-
-      // Warn if not on localhost (subdomain routing requires localhost)
-      if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-        console.warn(
-          '[Preview] Preview proxy subdomain routing may not work on non-localhost hostname'
-        );
       }
 
       const path = parsed.pathname + parsed.search;
