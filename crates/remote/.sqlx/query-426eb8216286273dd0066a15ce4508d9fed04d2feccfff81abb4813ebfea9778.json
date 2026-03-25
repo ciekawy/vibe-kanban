@@ -28,7 +28,8 @@
               "Enum": [
                 "blocking",
                 "related",
-                "has_duplicate"
+                "has_duplicate",
+                "spawned_by"
               ]
             }
           }
@@ -52,7 +53,8 @@
               "Enum": [
                 "blocking",
                 "related",
-                "has_duplicate"
+                "has_duplicate",
+                "spawned_by"
               ]
             }
           }

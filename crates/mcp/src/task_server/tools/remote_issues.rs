@@ -800,6 +800,7 @@ impl McpServer {
                         IssueRelationshipType::Blocking => "blocking".to_string(),
                         IssueRelationshipType::Related => "related".to_string(),
                         IssueRelationshipType::HasDuplicate => "has_duplicate".to_string(),
+                        IssueRelationshipType::SpawnedBy => "spawned_by".to_string(),
                     },
                 }
             })
