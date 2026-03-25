@@ -14,6 +14,7 @@ pub enum IssueRelationshipType {
     Blocking,
     Related,
     HasDuplicate,
+    SpawnedBy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

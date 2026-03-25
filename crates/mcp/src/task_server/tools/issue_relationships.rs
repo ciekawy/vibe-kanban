@@ -16,7 +16,7 @@ struct McpCreateIssueRelationshipRequest {
     issue_id: Uuid,
     #[schemars(description = "The related issue ID")]
     related_issue_id: Uuid,
-    #[schemars(description = "Relationship type: 'blocking', 'related', or 'has_duplicate'")]
+    #[schemars(description = "Relationship type: 'blocking', 'related', 'has_duplicate', or 'spawned_by'")]
     relationship_type: IssueRelationshipType,
 }
 
@@ -42,7 +42,7 @@ struct McpDeleteIssueRelationshipResponse {
 #[tool_router(router = issue_relationships_tools_router, vis = "pub")]
 impl McpServer {
     #[tool(
-        description = "Create a relationship between two issues. Types: 'blocking', 'related', 'has_duplicate'."
+        description = "Create a relationship between two issues. Types: 'blocking', 'related', 'has_duplicate', 'spawned_by'."
     )]
     async fn create_issue_relationship(
         &self,
