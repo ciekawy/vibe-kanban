@@ -84,7 +84,7 @@ services:
       - default
 
   remote-server:
-    image: vk-remote
+    image: vk-remote:${DOCKER_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: crates/remote/Dockerfile
