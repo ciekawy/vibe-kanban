@@ -30,7 +30,7 @@ services:
       - default
 
   azurite:
-    profiles: ["azurite"]
+    profiles: ["attachments"]
     image: mcr.microsoft.com/azure-storage/azurite:latest
     command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --loose --skipApiVersionCheck"
     ports:
@@ -43,7 +43,7 @@ services:
       retries: 30
 
   azurite-init:
-    profiles: ["azurite"]
+    profiles: ["attachments"]
     image: mcr.microsoft.com/azure-cli:latest
     depends_on:
       azurite:
@@ -89,6 +89,7 @@ services:
       context: ../..
       dockerfile: crates/remote/Dockerfile
       args:
+        # Build-time image/frontend args.
         FEATURES: ${FEATURES:-}
         POSTHOG_API_KEY: ${POSTHOG_API_KEY:-}
         POSTHOG_API_ENDPOINT: ${POSTHOG_API_ENDPOINT:-}
@@ -101,40 +102,59 @@ services:
     depends_on:
       remote-db:
         condition: service_healthy
+      azurite-init:
+        condition: service_completed_successfully
+        required: false
     environment:
       RUST_LOG: info,remote=info
 
+      # Core runtime
       SERVER_DATABASE_URL: postgres://remote:remote@remote-db:5432/remote
       SERVER_LISTEN_ADDR: 0.0.0.0:8081
       ELECTRIC_URL: http://electric:3000
-      # OAuth — configure at least one provider (GitHub or Google)
+      ELECTRIC_ROLE_PASSWORD: ${ELECTRIC_ROLE_PASSWORD:-remote}
+      SERVER_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET:?set in .env.remote}
+
+      # Auth 
+      # Configure at least one OAuth provider, or set self-host local auth credentials.
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
-      VIBEKANBAN_REMOTE_JWT_SECRET: ${VIBEKANBAN_REMOTE_JWT_SECRET:?set in .env.remote}
-      # Optional — leave empty to disable invitation emails
+      # Self-hosted local auth 
+      SELF_HOST_LOCAL_AUTH_EMAIL: ${SELF_HOST_LOCAL_AUTH_EMAIL:-}
+      SELF_HOST_LOCAL_AUTH_PASSWORD: ${SELF_HOST_LOCAL_AUTH_PASSWORD:-}
+
+      # Email / notifications (optional)
       LOOPS_EMAIL_API_KEY: ${LOOPS_EMAIL_API_KEY:-}
-      SERVER_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3002}
-      ELECTRIC_ROLE_PASSWORD: ${ELECTRIC_ROLE_PASSWORD:-remote}
+      # Loops transactional email template IDs (override with your own Loops account templates)
+      LOOPS_INVITE_TEMPLATE_ID: ${LOOPS_INVITE_TEMPLATE_ID:-cmhvy2wgs3s13z70i1pxakij9}
+      LOOPS_REVIEW_READY_TEMPLATE_ID: ${LOOPS_REVIEW_READY_TEMPLATE_ID:-cmj47k5ge16990iylued9by17}
+      LOOPS_REVIEW_FAILED_TEMPLATE_ID: ${LOOPS_REVIEW_FAILED_TEMPLATE_ID:-cmj49ougk1c8s0iznavijdqpo}
+      DIGEST_ENABLED: ${DIGEST_ENABLED:-false}
+
+      # Review worker / artifact storage (optional)
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
       R2_REVIEW_ENDPOINT: ${R2_REVIEW_ENDPOINT:-}
       R2_REVIEW_BUCKET: ${R2_REVIEW_BUCKET:-}
       REVIEW_WORKER_BASE_URL: ${REVIEW_WORKER_BASE_URL:-}
+
+      # GitHub App integration (optional)
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
 
+      # Billing (optional)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
       STRIPE_TEAM_SEAT_PRICE_ID: ${STRIPE_TEAM_SEAT_PRICE_ID:-}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_FREE_SEAT_LIMIT: ${STRIPE_FREE_SEAT_LIMIT:-1}
 
-      # Azure Blob Storage (optional — leave empty to disable image attachments)
-      # For Azurite dev: run with `docker compose --profile azurite up` and set these
-      # For production: set real Azure credentials in .env.remote
+      # Attachments (optional)
+      # Only set these when enabling the attachments profile or using external blob storage.
       AZURE_STORAGE_ACCOUNT_NAME: ${AZURE_STORAGE_ACCOUNT_NAME:-}
       AZURE_STORAGE_ACCOUNT_KEY: ${AZURE_STORAGE_ACCOUNT_KEY:-}
       AZURE_STORAGE_CONTAINER_NAME: ${AZURE_STORAGE_CONTAINER_NAME:-issue-attachments}
@@ -155,6 +175,7 @@ services:
       - default
 
   relay-server:
+    profiles: ["relay"]
     build:
       context: ../..
       dockerfile: crates/relay-tunnel/Dockerfile

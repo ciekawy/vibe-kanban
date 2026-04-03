@@ -1,13 +1,20 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 
 use api_types::LoginStatus;
 use async_trait::async_trait;
+use client_info::ClientInfo;
 use db::DBService;
-use deployment::{Deployment, DeploymentError, RemoteClientNotConfigured};
+use deployment::{Deployment, DeploymentError, RelayHostsNotConfigured, RemoteClientNotConfigured};
 use executors::profile::ExecutorConfigs;
 use git::GitService;
+use preview_proxy::PreviewProxyService;
 use relay_control::{RelayControl, signing::RelaySigningService};
-use server_info::ServerInfo;
+use relay_hosts::RelayHosts;
+use relay_webrtc::WebRtcHost;
+use remote_info::RemoteInfo;
 use services::services::{
     analytics::{AnalyticsConfig, AnalyticsContext, AnalyticsService, generate_user_id},
     approvals::Approvals,
@@ -24,7 +31,8 @@ use services::services::{
     remote_client::{RemoteClient, RemoteClientError},
     repo::RepoService,
 };
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
+use tokio_util::sync::CancellationToken;
 use trusted_key_auth::runtime::TrustedKeyAuthRuntime;
 use utils::{
     assets::{config_path, credentials_path, server_signing_key_path, trusted_keys_path},
@@ -57,14 +65,20 @@ pub struct LocalDeployment {
     approvals: Approvals,
     queued_message_service: QueuedMessageService,
     remote_client: Result<RemoteClient, RemoteClientNotConfigured>,
-    shared_api_base: Option<String>,
     auth_context: AuthContext,
     oauth_handoffs: Arc<RwLock<HashMap<Uuid, PendingHandoff>>>,
     trusted_key_auth: TrustedKeyAuthRuntime,
     relay_signing: RelaySigningService,
     relay_control: Arc<RelayControl>,
-    server_info: Arc<ServerInfo>,
+    client_info: ClientInfo,
+    remote_info: RemoteInfo,
+    preview_proxy: PreviewProxyService,
+    relay_hosts: Option<Arc<RelayHosts>>,
+    shutdown: CancellationToken,
+    webrtc_host: OnceLock<Arc<WebRtcHost>>,
+    ssh_config: Arc<russh::server::Config>,
     pty: PtyService,
+    pr_sync_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +89,7 @@ struct PendingHandoff {
 
 #[async_trait]
 impl Deployment for LocalDeployment {
-    async fn new() -> Result<Self, DeploymentError> {
+    async fn new(shutdown: CancellationToken) -> Result<Self, DeploymentError> {
         // Run one-time process logs migration from DB to filesystem
         services::services::execution_process::migrate_execution_logs_to_files()
             .await
@@ -157,9 +171,23 @@ impl Deployment for LocalDeployment {
         let api_base = std::env::var("VK_SHARED_API_BASE")
             .ok()
             .or_else(|| option_env!("VK_SHARED_API_BASE").map(|s| s.to_string()));
+        let relay_api_base = std::env::var("VK_SHARED_RELAY_API_BASE")
+            .ok()
+            .or_else(|| option_env!("VK_SHARED_RELAY_API_BASE").map(|s| s.to_string()));
+        let remote_info = RemoteInfo::new();
+        if let Some(api_base) = api_base.clone() {
+            remote_info
+                .set_api_base(api_base)
+                .expect("api_base already set");
+        }
+        if let Some(relay_api_base) = relay_api_base {
+            remote_info
+                .set_relay_api_base(relay_api_base)
+                .expect("relay_api_base already set");
+        }
 
-        let remote_client = match &api_base {
-            Some(url) => match RemoteClient::new(url, auth_context.clone()) {
+        let remote_client = match remote_info.get_api_base() {
+            Some(url) => match RemoteClient::new(&url, auth_context.clone()) {
                 Ok(client) => {
                     tracing::info!("Remote client initialized with URL: {}", url);
                     Ok(client)
@@ -180,7 +208,10 @@ impl Deployment for LocalDeployment {
         let relay_signing = RelaySigningService::load_or_generate(&server_signing_key_path())
             .expect("Failed to load or generate server signing key");
         let relay_control = Arc::new(RelayControl::new());
-        let server_info = Arc::new(ServerInfo::new());
+        let client_info = ClientInfo::new();
+        let preview_proxy = PreviewProxyService::new();
+
+        let ssh_config = embedded_ssh::config::build_config(relay_signing.signing_key());
 
         // We need to make analytics accessible to the ContainerService
         // TODO: Handle this more gracefully
@@ -208,6 +239,19 @@ impl Deployment for LocalDeployment {
         let file_search_cache = Arc::new(FileSearchCache::new());
 
         let pty = PtyService::new();
+        let relay_hosts = match remote_client.clone().ok() {
+            Some(remote_client) => Some(Arc::new(
+                RelayHosts::load(
+                    remote_client,
+                    remote_info.clone(),
+                    relay_signing.clone(),
+                    shutdown.child_token(),
+                )
+                .await,
+            )),
+            None => None,
+        };
+        let pr_sync_notify = Arc::new(Notify::new());
         {
             let db = db.clone();
             let analytics = analytics.as_ref().map(|s| AnalyticsContext {
@@ -216,7 +260,7 @@ impl Deployment for LocalDeployment {
             });
             let container = container.clone();
             let rc = remote_client.clone().ok();
-            PrMonitorService::spawn(db, analytics, container, rc).await;
+            PrMonitorService::spawn(db, analytics, container, rc, pr_sync_notify.clone()).await;
         }
 
         let deployment = Self {
@@ -235,14 +279,20 @@ impl Deployment for LocalDeployment {
             approvals,
             queued_message_service,
             remote_client,
-            shared_api_base: api_base,
             auth_context,
             oauth_handoffs,
             trusted_key_auth,
             relay_signing,
             relay_control,
-            server_info,
+            client_info,
+            remote_info,
+            preview_proxy,
+            relay_hosts,
+            shutdown,
+            webrtc_host: OnceLock::new(),
+            ssh_config,
             pty,
+            pr_sync_notify,
         };
 
         Ok(deployment)
@@ -312,20 +362,38 @@ impl Deployment for LocalDeployment {
         &self.relay_signing
     }
 
-    fn server_info(&self) -> &Arc<ServerInfo> {
-        &self.server_info
+    fn client_info(&self) -> &ClientInfo {
+        &self.client_info
+    }
+
+    fn remote_info(&self) -> &RemoteInfo {
+        &self.remote_info
+    }
+
+    fn preview_proxy(&self) -> &PreviewProxyService {
+        &self.preview_proxy
+    }
+
+    fn relay_hosts(&self) -> Result<&Arc<RelayHosts>, RelayHostsNotConfigured> {
+        self.relay_hosts.as_ref().ok_or(RelayHostsNotConfigured)
     }
 
     fn trusted_key_auth(&self) -> &TrustedKeyAuthRuntime {
         &self.trusted_key_auth
     }
-
-    fn shared_api_base(&self) -> Option<String> {
-        self.shared_api_base.clone()
-    }
 }
 
 impl LocalDeployment {
+    pub fn webrtc_host(&self) -> Option<Arc<WebRtcHost>> {
+        let local_addr = self.client_info.get_server_addr()?;
+
+        Some(
+            self.webrtc_host
+                .get_or_init(|| Arc::new(WebRtcHost::new(local_addr, self.shutdown.child_token())))
+                .clone(),
+        )
+    }
+
     pub fn workspace_manager(&self) -> &WorkspaceManager {
         &self.workspace_manager
     }
@@ -337,12 +405,13 @@ impl LocalDeployment {
     pub async fn get_login_status(&self) -> LoginStatus {
         if self.auth_context.get_credentials().await.is_none() {
             self.auth_context.clear_profile().await;
+            self.auth_context.clear_remote_auth_degraded_slug().await;
             return LoginStatus::LoggedOut;
         };
 
         if let Some(cached_profile) = self.auth_context.cached_profile().await {
             return LoginStatus::LoggedIn {
-                profile: cached_profile,
+                profile: Some(cached_profile),
             };
         }
 
@@ -352,15 +421,33 @@ impl LocalDeployment {
 
         match client.profile().await {
             Ok(profile) => {
+                self.auth_context.clear_remote_auth_degraded_slug().await;
                 self.auth_context.set_profile(profile.clone()).await;
-                LoginStatus::LoggedIn { profile }
+                LoginStatus::LoggedIn {
+                    profile: Some(profile),
+                }
             }
             Err(RemoteClientError::Auth) => {
                 let _ = self.auth_context.clear_credentials().await;
                 self.auth_context.clear_profile().await;
+                self.auth_context.clear_remote_auth_degraded_slug().await;
                 LoginStatus::LoggedOut
             }
-            Err(_) => LoginStatus::LoggedOut,
+            Err(err) => {
+                if self.auth_context.get_credentials().await.is_none() {
+                    self.auth_context.clear_profile().await;
+                    self.auth_context.clear_remote_auth_degraded_slug().await;
+                    return LoginStatus::LoggedOut;
+                }
+
+                self.auth_context
+                    .set_remote_auth_degraded_slug(
+                        err.degraded_slug()
+                            .unwrap_or_else(RemoteClientError::generic_degraded_slug),
+                    )
+                    .await;
+                LoginStatus::LoggedIn { profile: None }
+            }
         }
     }
 
@@ -389,5 +476,13 @@ impl LocalDeployment {
 
     pub fn pty(&self) -> &PtyService {
         &self.pty
+    }
+
+    pub fn ssh_config(&self) -> &Arc<russh::server::Config> {
+        &self.ssh_config
+    }
+
+    pub fn trigger_pr_sync(&self) {
+        self.pr_sync_notify.notify_one();
     }
 }

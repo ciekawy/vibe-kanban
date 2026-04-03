@@ -1,6 +1,7 @@
 pub mod attachments;
 pub mod auth;
 pub mod blobs;
+pub mod digest;
 pub mod electric_publications;
 pub mod github_app;
 pub mod hosts;
@@ -23,6 +24,7 @@ pub mod pending_uploads;
 pub mod project_notification_preferences;
 pub mod project_statuses;
 pub mod projects;
+pub mod pull_request_issues;
 pub mod pull_requests;
 pub mod reviews;
 pub mod tags;
