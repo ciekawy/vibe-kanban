@@ -9,8 +9,8 @@ IMAGE="vk-remote:${COMMIT}"
 
 if docker image inspect "${IMAGE}" > /dev/null 2>&1; then
   echo "Image ${IMAGE} already exists, skipping build"
-  DOCKER_IMAGE_TAG="${COMMIT}" docker compose --env-file .env.remote up -d
+  DOCKER_IMAGE_TAG="${COMMIT}" docker compose --env-file .env.remote up -d --force-recreate --remove-orphans
 else
   echo "Building image ${IMAGE}"
-  DOCKER_IMAGE_TAG="${COMMIT}" docker compose --env-file .env.remote up -d --build
+  DOCKER_IMAGE_TAG="${COMMIT}" docker compose --env-file .env.remote up -d --build --force-recreate --remove-orphans
 fi
